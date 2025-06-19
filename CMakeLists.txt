@@ -19,7 +19,7 @@ add_executable (CurlOnAsio "CurlOnAsio.cpp" "CurlOnAsio.h")
 target_link_libraries(CurlOnAsio PUBLIC
   # Link against the required libraries.
   Boost::boost
-  curl
+  CURL::libcurl
 )
 
 if (CMAKE_VERSION VERSION_GREATER 3.12)
