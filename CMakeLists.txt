@@ -15,7 +15,7 @@ find_package(Boost REQUIRED)
 find_package(curl REQUIRED)
 
 # Add source to this project's executable.
-add_executable (CurlOnAsio "CurlOnAsio.cpp" "CurlOnAsio.h")
+add_executable (CurlOnAsio "CurlOnAsio.cpp" "CurlOnAsio.h" "http_curl.ixx" "utils.ixx")
 target_link_libraries(CurlOnAsio PUBLIC
   # Link against the required libraries.
   Boost::boost
