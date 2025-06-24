@@ -18,6 +18,8 @@ export namespace http_curl
 
     struct Response
     {
+        // TODO:
+        // support status code; filter out trailers and Content-Encoding
         long status_code = 0;
         std::string response_data;
         std::vector<std::pair<std::string, std::string>> response_headers;
@@ -235,6 +237,8 @@ namespace
 
         THROW_IF_CURL_ERROR_DETAILED(curl_easy_setopt(c, CURLOPT_HEADERFUNCTION, &response_header_reader), e);
         THROW_IF_CURL_ERROR_DETAILED(curl_easy_setopt(c, CURLOPT_HEADERDATA, &response), e);
+
+        utils::log_output("curl initializing on thread {}", std::this_thread::get_id());
     }
 
     void Task::add_to_multi(CURLM* destination)
@@ -274,10 +278,13 @@ namespace
 
     void Task::invoke_completion_handler(std::exception_ptr e)
     {
+        utils::log_output("curl finishing on thread {}", std::this_thread::get_id());
+
         FAIL_FAST_IF_MSG(executor == nullptr, "executor not set");
         FAIL_FAST_IF_MSG(handler == nullptr, "handler not set");
         boost::asio::dispatch(executor, [h = std::move(handler), e = std::move(e), r = std::move(response)]() mutable
         {
+            utils::log_output("curl dispatched handler on thread {}", std::this_thread::get_id());
             h(std::move(e), std::move(r));
         });
         e = nullptr;
