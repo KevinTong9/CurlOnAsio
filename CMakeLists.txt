@@ -21,6 +21,10 @@ target_link_libraries(CurlOnAsio PUBLIC
   Boost::boost
   CURL::libcurl
 )
+target_compile_definitions(CurlOnAsio PRIVATE
+  # Define any necessary preprocessor definitions here.
+  _WIN32_WINNT=0x0601
+)
 
 if (CMAKE_VERSION VERSION_GREATER 3.12)
   set_property(TARGET CurlOnAsio PROPERTY CXX_STANDARD 20)
