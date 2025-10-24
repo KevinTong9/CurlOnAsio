@@ -112,7 +112,7 @@ int main()
         }
     };
     http_beast::HttpServer server = http_beast::start_http_server(data);
-    utils::log_output("Server running on {}", server.local_endpoint);
+    utils::log_output("Server running on http://{}", server.local_endpoint);
 
     auto task = boost::asio::co_spawn(common_io_context::get_io_context(), async_main, boost::asio::use_future);
     common_io_context::blocking_run_io_context();

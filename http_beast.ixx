@@ -15,7 +15,7 @@ export namespace http_beast
         using Handler = boost::asio::awaitable<bool>(Request const& request, Response& response);
 
         boost::asio::ip::tcp::endpoint preferred_endpoint;
-        std::chrono::steady_clock::duration timeout = std::chrono::seconds{ 1 };
+        std::chrono::steady_clock::duration timeout = std::chrono::seconds{ 5 };
         std::vector<std::pair<std::regex, std::function<Handler>>> get_handlers;
         std::vector<std::pair<std::regex, std::function<Handler>>> post_handlers;
         std::function<void(std::string_view message, Request const* request, std::exception_ptr e)> logger;
@@ -94,7 +94,7 @@ http_beast::HttpServer http_beast::start_http_server(http_beast::ServerData data
     boost::asio::ip::tcp::acceptor acceptor{ io_context, data.preferred_endpoint.protocol() };
     acceptor.bind(data.preferred_endpoint);
     acceptor.listen();
-    
+
     http_beast::HttpServer server
     {
         .data = std::make_shared<http_beast::ServerData>(std::move(data)),
@@ -118,23 +118,23 @@ namespace
         {
             try
             {
-                utils::log_debug("http server accepting on {}", acceptor.local_endpoint());
+                utils::log_debug("http server accepting on http://{}", acceptor.local_endpoint());
                 boost::asio::ip::tcp::socket socket = co_await acceptor.async_accept(boost::asio::use_awaitable);
                 utils::log_debug("http server accepted new connection");
                 boost::beast::tcp_stream connection{ std::move(socket) };
                 boost::asio::co_spawn(executor, handle_connection(server, std::move(connection)), [d = server.data](std::exception_ptr e)
-                {
-                    if (e == nullptr)
                     {
-                        return;
-                    }
-                    d->try_log("exception in handle_connection", nullptr, e);
-                    try
-                    {
-                        std::rethrow_exception(e);
-                    }
-                    CATCH_LOG_MSG("exception in handle_connection");
-                });
+                        if (e == nullptr)
+                        {
+                            return;
+                        }
+                        d->try_log("exception in handle_connection", nullptr, e);
+                        try
+                        {
+                            std::rethrow_exception(e);
+                        }
+                        CATCH_LOG_MSG("exception in handle_connection");
+                    });
             }
             CATCH_LOG_MSG("exception when accepting connection");
         }
@@ -148,41 +148,67 @@ namespace
     {
         // This buffer is required to persist across reads
         boost::beast::flat_buffer buffer;
-
-        while (true)
+        try
         {
-            // Set the timeout.
-            connection.expires_after(server.data->timeout);
-
-            // Read a request
-            http_beast::Request request;
-            co_await boost::beast::http::async_read(connection, buffer, request);
-
-            // Handle the request
-            bool is_head = request.method() == boost::beast::http::verb::head;
-            http_beast::Response response = co_await handle_request(*server.data, std::move(request));
-            if (is_head)
+            while (true)
             {
-                response.body().clear();
+                // Set the timeout.
+                connection.expires_after(server.data->timeout);
+
+                // Read a request
+                http_beast::Request request;
+                try
+                {
+                    co_await boost::beast::http::async_read(connection, buffer, request);
+                }
+                catch (const boost::system::system_error& e)
+                {
+                    if (e.code() == boost::beast::error::timeout)
+                    {
+                        utils::log_debug("正常超时，关闭连接");
+                        break;
+                    }
+                    throw;
+                }
+
+                // Handle the request
+                bool is_head = request.method() == boost::beast::http::verb::head;
+                http_beast::Response response = co_await handle_request(*server.data, std::move(request));
+                if (is_head)
+                {
+                    response.body().clear();
+                }
+                boost::beast::http::message_generator message{ std::move(response) };
+
+                // Determine if we should close the connection
+                bool keep_alive = message.keep_alive();
+
+                // Send the response
+                co_await boost::beast::async_write(connection, std::move(message));
+
+                if (!keep_alive)
+                {
+                    // This means we should close the connection, usually because
+                    // the response indicated the "Connection: close" semantic.
+                    break;
+                }
             }
-            boost::beast::http::message_generator message{ std::move(response) };
-
-            // Determine if we should close the connection
-            bool keep_alive = message.keep_alive();
-
-            // Send the response
-            co_await boost::beast::async_write(connection, std::move(message));
-
-            if (!keep_alive)
+        }
+        catch (const boost::system::system_error& e)
+        {
+            if (e.code() != boost::beast::error::timeout)
             {
-                // This means we should close the connection, usually because
-                // the response indicated the "Connection: close" semantic.
-                break;
+                server.data->try_log("超时", nullptr, std::current_exception());
             }
+        }
+        catch (...)
+        {
+            server.data->try_log("未知异常", nullptr, std::current_exception());
         }
 
         // Send a TCP shutdown
-        connection.socket().shutdown(boost::asio::ip::tcp::socket::shutdown_send);
+        boost::system::error_code ec;
+        connection.socket().shutdown(boost::asio::ip::tcp::socket::shutdown_send, ec);  //忽略关闭错误，因为客户端可能已经断开
 
         // At this point the connection is closed gracefully
         // we ignore the error because the client might have
@@ -197,27 +223,27 @@ namespace
     {
         // Returns a bad request response
         auto const bad_request = [&request](std::string_view why)
-        {
-            return simple_response
-            (
-                request,
-                boost::beast::http::status::bad_request,
-                why,
-                "text/html"
-            );
-        };
+            {
+                return simple_response
+                (
+                    request,
+                    boost::beast::http::status::bad_request,
+                    why,
+                    "text/html"
+                );
+            };
 
         // Returns a not found response
         auto const not_found = [&request](std::string_view target)
-        {
-            return simple_response
-            (
-                request,
-                boost::beast::http::status::not_found,
-                std::format("The resource '{}' was not found", target),
-                "text/html"
-            );
-        };
+            {
+                return simple_response
+                (
+                    request,
+                    boost::beast::http::status::not_found,
+                    std::format("The resource '{}' was not found", target),
+                    "text/html"
+                );
+            };
 
         std::string_view target{ request.target() };
 
